@@ -18,6 +18,7 @@
   },
   "homepage": "https://github.com/Hikovsky/camera-switch#readme",
   "devDependencies": {
+    "html-webpack-plugin": "^5.5.0",
     "webpack": "^5.75.0",
     "webpack-cli": "^5.0.1"
   }
