@@ -1,0 +1,16 @@
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+.wrapper {
+	width: 640px;
+	height: 480px;
+}
+
+@media screen and (max-width: 400px) {
+	.wrapper {
+		width: 100vw;
+		height: 100vh;
+	}
+}
