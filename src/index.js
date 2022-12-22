@@ -1,6 +1,10 @@
+import { getDevicesList } from './lib/devices.js'
+import { getOperationSystem } from './lib/os.js'
+
 class CameraStream extends HTMLElement {
 	constructor() {
 		super()
+		this.operationSystem = getOperationSystem()
 		const shadowRoot = this.attachShadow({ mode: 'open' })
 		shadowRoot.innerHTML = this.getInnerHtml()
 	}
@@ -9,22 +13,30 @@ class CameraStream extends HTMLElement {
 		this.shadowRoot
 			.getElementById('mirror')
 			.addEventListener('click', () => this.toggleMirror())
-		this.shadowRoot.getElementById('switch').addEventListener('click', () => {
-			if (this.stream) {
-				const deviceId = this.stream.getVideoTracks()[0].getSettings().deviceId
-				const deviceIndex = this.devices.indexOf(deviceId)
-				const device =
-					deviceIndex === this.devices.length - 1
-						? this.devices[0]
-						: this.devices[deviceIndex + 1]
-				this.setStream(device)
-			}
-		})
+		this.shadowRoot
+			.getElementById('switch')
+			.addEventListener('click', () => this.switchCamera())
 		this.setup()
 	}
 
+	disconnectedCallback() {
+		this.stopStream()
+	}
+
+	static get observedAttributes() {
+		return ['default-camera']
+	}
+
+	attributeChangedCallback(name, oldValue, newValue) {
+		if (name === 'default-camera' && oldValue) this.setStream()
+	}
+
+	adoptedCallback() {
+		console.log('document.adoptNode called for CameraSwitch web component')
+	}
+
 	async setup() {
-		await this.setDevicesList()
+		this.devices = await getDevicesList(this.operationSystem)
 		const device =
 			this.hasAttribute('default-camera') &&
 			this.getAttribute('default-camera') === 'back'
@@ -33,113 +45,59 @@ class CameraStream extends HTMLElement {
 		await this.setStream(device)
 	}
 
-	disconnectedCallback() {
-		console.log('CameraStream is disconnected from web page')
-	}
-
-	static get observedAttributes() {
-		return ['srcObject', 'default-camera']
-	}
-
-	attributeChangedCallback(name, oldValue, newValue) {
-		console.log(
-			`${name} attribute changed from ${oldValue} to ${newValue} if CameraSwitch web component`
-		)
-	}
-
-	adoptedCallback() {
-		console.log('document.adoptNode called for CameraSwitch web component')
-	}
-
-	setOperationSystem() {
-		const userAgent = window.navigator.userAgent
-		const platform = window.navigator.platform
-		const macosPlatforms = ['Macintosh', 'MacIntel', 'MacPPC', 'Mac68K']
-		const windowsPlatforms = ['Win32', 'Win64', 'Windows', 'WinCE']
-		const iosPlatforms = ['iPhone', 'iPad', 'iPod']
-		let operationSystem = null
-
-		if (macosPlatforms.indexOf(platform) !== -1) {
-			operationSystem = 'Mac OS'
-		} else if (iosPlatforms.indexOf(platform) !== -1) {
-			operationSystem = 'iOS'
-		} else if (windowsPlatforms.indexOf(platform) !== -1) {
-			operationSystem = 'Windows'
-		} else if (/Android/.test(userAgent)) {
-			operationSystem = 'Android'
-		} else if (!os && /Linux/.test(platform)) {
-			operationSystem = 'Linux'
-		}
-
-		this.operationSystem = operationSystem
-	}
-
-	async setDevicesList() {
-		await navigator.mediaDevices.getUserMedia({
-			video: true,
+	async setStream(deviceId) {
+		this.stopStream()
+		this.srcObject = await navigator.mediaDevices.getUserMedia({
+			video: {
+				deviceId: deviceId,
+			},
 			audio: false,
 		})
-		this.setOperationSystem()
-		let result = []
-		try {
-			const devices = await navigator.mediaDevices.enumerateDevices()
-			if (this.operationSystem === 'Android')
-				result = this.getAndroidDevices(devices)
-			else if (this.operationSystem === 'iOS')
-				result = this.getIOSDevices(devices)
-			if (!result.length) result = this.getDefaultDevices(devices)
-		} catch (err) {
-			console.log(err.name + ': ' + err.message)
-		}
-		this.stopStream()
-		this.devices = result
+		const videoElement = this.shadowRoot.getElementById('video')
+		videoElement.srcObject = this.srcObject
+		this.setMirror()
+		this.dispatchUpdateSource()
 	}
 
-	getAndroidDevices(devices) {
-		const result = []
-		for (const device of devices) {
-			const labelArray = device.label.split(' ')
-			if (device.kind === 'videoinput') {
-				const cameraNumber = labelArray[1][0]
-				if (cameraNumber === '0' || cameraNumber === '1') {
-					if (labelArray[3] === 'front') result[1] = device.deviceId
-					else if (labelArray[3] === 'back') result[0] = device.deviceId
-				}
-			}
+	stopStream() {
+		const videoElement = this.shadowRoot.getElementById('video')
+		if (videoElement.srcObject) {
+			const tracks = videoElement.srcObject.getTracks()
+			tracks.forEach((track) => track.stop())
+			this.srcObject = null
+			videoElement.srcObject = null
 		}
-		return result
 	}
 
-	getIOSDevices(devices) {
-		const result = []
-		for (const device of devices) {
-			if (device.kind === 'videoinput') {
-				const labelArray = device.label.split(' ')
-				if (labelArray.length === 2) {
-					const cameraLabel = labelArray[0]
-					if (cameraLabel === 'Front') result[1] = device.deviceId
-					else if (cameraLabel === 'Back') result[0] = device.deviceId
-				} else {
-					const cameraLabel = labelArray[2]
-					if (cameraLabel === 'передней') result[1] = device.deviceId
-					else if (cameraLabel === 'задней') result[0] = device.deviceId
-				}
-				// iOS videoinput device labels
-				// Камера на передней панели
-				// Камера на задней панели
-				// Front camera
-				// Back camera
-			}
-		}
-		return result
+	dispatchUpdateSource() {
+		const event = new CustomEvent('updateSource', {
+			detail: {
+				srcObject: this.srcObject,
+			},
+		})
+		this.dispatchEvent(event)
 	}
 
-	getDefaultDevices(devices) {
-		const result = []
-		for (const device of devices) {
-			if (device.kind === 'videoinput') result.push(device.deviceId)
+	switchCamera() {
+		if (this.srcObject) {
+			const deviceId = this.srcObject.getVideoTracks()[0].getSettings().deviceId
+			const deviceIndex = this.devices.indexOf(deviceId)
+			const device =
+				deviceIndex === this.devices.length - 1
+					? this.devices[0]
+					: this.devices[deviceIndex + 1]
+			this.setStream(device)
 		}
-		return result
+	}
+
+	setMirror() {
+		if (['Android', 'iOS'].includes(this.operationSystem)) {
+			const deviceIndex = this.devices.indexOf(
+				this.srcObject.getVideoTracks()[0].getSettings().deviceId
+			)
+			if (deviceIndex === 0) this.toggleMirror('back')
+			else if (deviceIndex === 1) this.toggleMirror('front')
+		} else this.toggleMirror('front')
 	}
 
 	toggleMirror(camera = null) {
@@ -153,36 +111,50 @@ class CameraStream extends HTMLElement {
 		}
 	}
 
-	async setStream(deviceId = null) {
-		this.stopStream()
-		const constraints = {
-			video: {
-				deviceId: deviceId,
-			},
-			audio: false,
-		}
-		if (!deviceId) constraints.video = true
-		this.stream = await navigator.mediaDevices.getUserMedia(constraints)
-		const videoElement = this.shadowRoot.getElementById('video')
-		this.srcObject = this.stream
-		videoElement.srcObject = this.stream
-		if (['Android', 'iOS'].includes(this.operationSystem)) {
-			const deviceIndex = this.devices.indexOf(
-				this.stream.getVideoTracks()[0].getSettings().deviceId
-			)
-			if (deviceIndex === 0) this.toggleMirror('back')
-			else if (deviceIndex === 1) this.toggleMirror('front')
-		} else this.toggleMirror('front')
-	}
-
-	stopStream() {
-		const videoElement = this.shadowRoot.getElementById('video')
-		if (videoElement.srcObject) {
-			const tracks = videoElement.srcObject.getTracks()
-			tracks.forEach((track) => track.stop())
-			this.srcObject = null
-			videoElement.srcObject = null
-		}
+	getInnerHtml() {
+		return `
+    <style>
+      .video {
+        width: 100%;
+        height: 100%;
+        position: relative;
+      }
+      video {
+        width: 100%;
+        height: 100%;
+        object-fit: fill;
+      }
+      .controls {
+        position: absolute;
+        right: 0;
+        top: 0;
+        z-index: 999999;
+      }
+      .icon {
+        padding: 5px 10px;
+        width: auto;
+        height: auto;
+        cursor: pointer;
+        background: rgba(255, 255, 255, 0.4);;
+        border: none;
+        border-radius: 10px;
+        outline: none;
+      }
+      .icon svg {
+        width: 32px;
+        height: 32px;
+      }
+      .mirror {
+        transform: scaleX(-1);
+      }
+    </style>
+    <div class='video'>
+      <video class='' id='video' autoplay playsinline></video>
+      <div class='controls'>
+        <button class='icon' id='mirror'>${this.getMirrorSVG()}</button>
+        <button class='icon' id='switch'>${this.getSwitchSVG()}</button>
+      </div>
+    </div>`
 	}
 
 	getMirrorSVG() {
@@ -232,52 +204,6 @@ class CameraStream extends HTMLElement {
       </svg>
 
     `
-	}
-
-	getInnerHtml() {
-		return `
-    <style>
-      .video {
-        width: 100%;
-        height: 100%;
-        position: relative;
-      }
-      video {
-        width: 100%;
-        height: 100%;
-        object-fit: fill;
-      }
-      .controls {
-        position: absolute;
-        right: 0;
-        top: 0;
-        z-index: 999999;
-      }
-      .icon {
-        padding: 5px 10px;
-        width: auto;
-        height: auto;
-        cursor: pointer;
-        background: rgba(255, 255, 255, 0.4);;
-        border: none;
-        border-radius: 10px;
-        outline: none;
-      }
-      .icon svg {
-        width: 32px;
-        height: 32px;
-      }
-      .mirror {
-        transform: scaleX(-1);
-      }
-    </style>
-    <div class='video'>
-      <video class='' id='video' autoplay playsinline></video>
-      <div class='controls'>
-        <button class='icon' id='mirror'>${this.getMirrorSVG()}</button>
-        <button class='icon' id='switch'>${this.getSwitchSVG()}</button>
-      </div>
-    </div>`
 	}
 }
 

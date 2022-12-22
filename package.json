@@ -1,0 +1,24 @@
+{
+  "name": "camera-stream",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "webpack serve",
+    "build": "webpack"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hikovsky/camera-switch.git"
+  },
+  "author": "hikovsky",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Hikovsky/camera-switch/issues"
+  },
+  "homepage": "https://github.com/Hikovsky/camera-switch#readme",
+  "devDependencies": {
+    "webpack": "^5.75.0",
+    "webpack-cli": "^5.0.1"
+  }
+}
